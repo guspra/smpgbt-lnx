@@ -1,45 +1,32 @@
-# Jurnal Harian Automation Bot
+**Linux Deployment**
 
-Automates the daily journal submission flow on the SIMPEG portal using Puppeteer. The script signs in with the provided credentials, fills in the activity form, and saves a proof screenshot (`proof.png`) for record keeping.
+Use this guide when you roll the SIMPEG journal bot onto a Linux server.
 
-## Prerequisites
-- Node.js 20+ (Puppeteer bundles Chromium, so no separate browser install is required)
-- npm (ships with Node.js)
-- Optional: Docker Desktop (for the Windows batch script runner)
+- **Packages**  
+  - `sudo apt update && sudo apt install -y git docker.io docker-compose-plugin`  
+  - `sudo systemctl enable --now docker`
 
-## Setup
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Create a `.env` file in the project root (never commit this). At minimum set:
-   ```ini
-   NIP=your_nip_here
-   PASSWORD=your_password_here
-   ```
-   You can also override defaults for `JOURNAL_TEXT`, `JAM_MULAI`, `SKP_VALUE`, etc. Set `JOURNAL_TIMEZONE` (default: `Asia/Jakarta`) if you need the journal to follow a specific timezone when picking the date and driving the browser’s clock. See the inline comments in `.env` for the complete list.
+- **Clone**  
+  - `git clone https://github.com/guspra/smpgbt-lnx.git /opt/smpgbt`  
+  - `cd /opt/smpgbt`
 
-## Running the Bot
-- **Directly with Node.js**
-  ```bash
-  npm start
-  ```
-  The bot will log progress to the console and save the proof screenshot as `proof.png` when it finishes.
+- **Environment**  
+  - `cp .env.example .env` (if present) and fill `NIP`, `PASSWORD`, schedule values, etc.  
+  - Keep `.env` owned by the user that will run the job.
 
-- **Via Docker on Windows (`run.bat`)**
-  ```powershell
-  .\run.bat
-  ```
-  This script builds an image, runs the container with your `.env`, and copies the generated `proof.png` back to the host.
+- **Smoke Test**  
+  - `chmod +x run.sh`  
+  - `./run.sh`  
+  - Confirm the script finishes and leaves `proof.png` in the repo root.
 
-## Output
-- `proof.png` – full-page screenshot generated after a successful journal submission.
+- **Cron (optional)**  
+  - `crontab -e`  
+  - `5 7 * * 1-5 /opt/smpgbt/run.sh >> /var/log/smpgbt.log 2>&1`
 
-## Uploading Changes
-When you're ready to publish your work:
-```bash
-git add .
-git commit -m "Add automation bot and docs"
-git push origin main
-```
-Make sure `.env` and proof screenshots remain untracked (already covered in `.gitignore`).
+- **Logs**  
+  - `tail -f /var/log/smpgbt.log`  
+  - `docker logs smpgbt-run` if you keep the container around for debugging.
+
+- **Secrets**  
+  - Never check `.env` into git. Ensure file permissions restrict access: `chmod 600 .env`.
+
