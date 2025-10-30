@@ -7,7 +7,7 @@ const {
   SIMPEG_JOURNAL_URL = 'https://simpeg.kemenkum.go.id/devp/siap/skp_journal.php',
   NIP,
   PASSWORD,
-  JOURNAL_TEXT = 'Melaksanakan tugas IT sesuai SKP',
+  JOURNAL_TEXT = 'Melaksanakan tugas teknologi informasi sesuai SKP dan perintah atasan',
   JAM_MULAI = '06',
   MENIT_MULAI = '25',
   JAM_SELESAI = '17',
