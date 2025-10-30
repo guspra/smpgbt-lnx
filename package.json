@@ -1,0 +1,13 @@
+{
+  "name": "jurnal-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "NODE_OPTIONS=--trace-warnings node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "puppeteer": "^23.3.0"
+  }
+}
