@@ -1,25 +1,26 @@
 // index.js
 import 'dotenv/config';
+import fs from 'node:fs';
 import puppeteer from 'puppeteer';
 
-const {
-  SIMPEG_LOGIN_URL = 'https://simpeg.kemenkum.go.id/devp/siap/signin.php',
-  SIMPEG_JOURNAL_URL = 'https://simpeg.kemenkum.go.id/devp/siap/skp_journal.php',
-  NIP,
-  PASSWORD,
-  JOURNAL_TEXT = 'Melaksanakan tugas teknologi informasi sesuai SKP dan perintah atasan',
-  JAM_MULAI = '06',
-  MENIT_MULAI = '25',
-  JAM_SELESAI = '17',
-  MENIT_SELESAI = '35',
-  JUMLAH = '1',
-  SATUAN = '1',
-  BIAYA = '0',
+const defaults = {
+  SIMPEG_LOGIN_URL: process.env.SIMPEG_LOGIN_URL ?? 'https://simpeg.kemenkum.go.id/devp/siap/signin.php',
+  SIMPEG_JOURNAL_URL: process.env.SIMPEG_JOURNAL_URL ?? 'https://simpeg.kemenkum.go.id/devp/siap/skp_journal.php',
+  NIP: process.env.NIP,
+  PASSWORD: process.env.PASSWORD,
+  JOURNAL_TEXT: process.env.JOURNAL_TEXT ?? 'Melaksanakan tugas teknologi informasi sesuai SKP dan perintah atasan',
+  JAM_MULAI: process.env.JAM_MULAI ?? '06',
+  MENIT_MULAI: process.env.MENIT_MULAI ?? '25',
+  JAM_SELESAI: process.env.JAM_SELESAI ?? '17',
+  MENIT_SELESAI: process.env.MENIT_SELESAI ?? '35',
+  JUMLAH: process.env.JUMLAH ?? '1',
+  SATUAN: process.env.SATUAN ?? '1',
+  BIAYA: process.env.BIAYA ?? '0',
   // SKP pilihan: 'lainlain' | '2' (Tugas Tambahan) | '3' (Kreatifitas) | atau value lain yang tersedia
-  SKP_VALUE = 'lainlain',
-  HEADLESS = 'true',
-  JOURNAL_TIMEZONE = 'Asia/Jakarta'
-} = process.env;
+  SKP_VALUE: process.env.SKP_VALUE ?? 'lainlain',
+  HEADLESS: process.env.HEADLESS ?? 'true',
+  JOURNAL_TIMEZONE: process.env.JOURNAL_TIMEZONE ?? 'Asia/Jakarta'
+};
 
 function today_ddmmyyyy(timeZone) {
   try {
@@ -64,31 +65,70 @@ async function selectWithFallback(page, selector, desiredValue) {
   }
 }
 
-async function run() {
-  if (!NIP || !PASSWORD) {
-    console.error('Please set NIP and PASSWORD in .env');
+function parseAccountsOverrides() {
+  const raw = process.env.ACCOUNTS_JSON;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.error('Failed to parse ACCOUNTS_JSON. Provide a valid JSON array string.', err);
+    return [];
+  }
+}
+
+function resolveAccounts() {
+  const extras = parseAccountsOverrides();
+
+  const primary = defaults.NIP && defaults.PASSWORD ? [defaults] : [];
+  const mergedAccounts = [...primary, ...extras].map((accountOverrides, index) => ({
+    ...defaults,
+    ...accountOverrides,
+    __index: index + 1
+  })).filter(acc => acc.NIP && acc.PASSWORD);
+
+  if (mergedAccounts.length === 0) {
+    console.error('No valid accounts found. Provide NIP/PASSWORD in .env or through ACCOUNTS_JSON/ACCOUNTS_FILE.');
     process.exit(1);
   }
 
+  const seen = new Set();
+  const deduped = [];
+  for (const account of mergedAccounts) {
+    const key = `${account.NIP}-${account.PASSWORD}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(account);
+  }
+  return deduped;
+}
+
+function screenshotNameFor(account, total) {
+  if (total === 1) return 'proof.png';
+  const safeSuffix = (account.NIP ?? `account-${account.__index ?? 'x'}`).replace(/[^0-9A-Za-z_-]/g, '') || `account-${account.__index ?? 'x'}`;
+  return `proof-${safeSuffix}.png`;
+}
+
+async function runForAccount(account, screenshotPath) {
   const browser = await puppeteer.launch({
-    headless: HEADLESS === 'true',
+    headless: account.HEADLESS === 'true',
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
     defaultViewport: { width: 1366, height: 900 }
   });
 
   const page = await browser.newPage();
   try {
-    await page.emulateTimezone(JOURNAL_TIMEZONE);
+    await page.emulateTimezone(account.JOURNAL_TIMEZONE);
   } catch (err) {
-    console.warn(`Failed to emulate browser timezone "${JOURNAL_TIMEZONE}". Continuing with default timezone.`, err);
+    console.warn(`Failed to emulate browser timezone "${account.JOURNAL_TIMEZONE}". Continuing with default timezone.`, err);
   }
 
   // 1) Open login page
-  await page.goto(SIMPEG_LOGIN_URL, { waitUntil: 'networkidle2' });
+  await page.goto(account.SIMPEG_LOGIN_URL, { waitUntil: 'networkidle2' });
 
   // 2) Type NIP, click "Masuk" to open password modal
   await page.waitForSelector('#user_nip', { visible: true });
-  await page.type('#user_nip', NIP, { delay: 20 });
+  await page.type('#user_nip', account.NIP, { delay: 20 });
   const getVisibleMasuk =
     `(() => {
       const candidates = Array.from(document.querySelectorAll('#masuk'));
@@ -114,7 +154,7 @@ async function run() {
 
   // 3) Type password inside modal and click Login
   await page.waitForSelector('#vpassword', { visible: true });
-  await page.type('#vpassword', PASSWORD, { delay: 20 });
+  await page.type('#vpassword', account.PASSWORD, { delay: 20 });
 
   // The "Login" button has id #btnsimpan in the modal
   // After AJAX validation, it submits a hidden form which triggers a navigation.
@@ -131,10 +171,10 @@ async function run() {
   await navPromise;
 
   // 4) Go directly to the Jurnal Harian page
-  await page.goto(SIMPEG_JOURNAL_URL, { waitUntil: 'networkidle2' });
+  await page.goto(account.SIMPEG_JOURNAL_URL, { waitUntil: 'networkidle2' });
 
   // 5) Set the date (dd-mm-yyyy) then wait for the table to reload
-  const tgl = today_ddmmyyyy(JOURNAL_TIMEZONE);
+  const tgl = today_ddmmyyyy(account.JOURNAL_TIMEZONE);
   console.log('Using journal date:', tgl);
   await page.waitForSelector('#tgla');
   await page.$eval('#tgla', (el, val) => { el.value = val; el.dispatchEvent(new Event('change', { bubbles: true })); }, tgl);
@@ -149,21 +189,21 @@ async function run() {
   ]);
 
   // 7) Fill the modal form
-  await selectWithFallback(page, '#jammulai', JAM_MULAI.padStart(2, '0'));
-  await selectWithFallback(page, '#menitmulai', MENIT_MULAI.padStart(2, '0'));
-  await selectWithFallback(page, '#jamselesai', JAM_SELESAI.padStart(2, '0'));
-  await selectWithFallback(page, '#menitselesai', MENIT_SELESAI.padStart(2, '0'));
+  await selectWithFallback(page, '#jammulai', account.JAM_MULAI.padStart(2, '0'));
+  await selectWithFallback(page, '#menitmulai', account.MENIT_MULAI.padStart(2, '0'));
+  await selectWithFallback(page, '#jamselesai', account.JAM_SELESAI.padStart(2, '0'));
+  await selectWithFallback(page, '#menitselesai', account.MENIT_SELESAI.padStart(2, '0'));
 
   // SKP category (fallback to first option if provided value not present)
-  await selectWithFallback(page, '#skpkgid', SKP_VALUE);
+  await selectWithFallback(page, '#skpkgid', account.SKP_VALUE);
 
   // Kegiatan
-  await page.$eval('#keterangan', (el, val) => { el.value = val; }, JOURNAL_TEXT);
+  await page.$eval('#keterangan', (el, val) => { el.value = val; }, account.JOURNAL_TEXT);
 
   // Numbers
-  await page.$eval('#jumlah', (el, val) => { el.value = val; }, JUMLAH);
-  await page.$eval('#satuan', (el, val) => { el.value = val; }, SATUAN);
-  await page.$eval('#biaya', (el, val) => { el.value = val; }, BIAYA);
+  await page.$eval('#jumlah', (el, val) => { el.value = val; }, account.JUMLAH);
+  await page.$eval('#satuan', (el, val) => { el.value = val; }, account.SATUAN);
+  await page.$eval('#biaya', (el, val) => { el.value = val; }, account.BIAYA);
 
   // 8) Save
   // Clicking #btnsimpan closes the modal and triggers AJAX save, then an "Information" modal (#infoBox) appears
@@ -177,13 +217,37 @@ async function run() {
 
   // 9) Take a proof screenshot
   await new Promise(resolve => setTimeout(resolve, 800)); // tiny settle
-  await page.screenshot({ path: 'proof.png', fullPage: true });
-  console.log('Saved screenshot => proof.png');
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  console.log(`Saved screenshot => ${screenshotPath}`);
 
   await browser.close();
 }
 
-run().catch(async (err) => {
+async function runAll() {
+  const accounts = resolveAccounts();
+  const results = [];
+
+  for (const [idx, account] of accounts.entries()) {
+    console.log('='.repeat(64));
+    console.log(`Account ${idx + 1}/${accounts.length} — NIP ${account.NIP}`);
+    console.log('='.repeat(64));
+    const screenshotPath = screenshotNameFor(account, accounts.length);
+    await runForAccount(account, screenshotPath);
+    results.push({ screenshotPath });
+  }
+
+  const finalScreenshot = results.length > 0 ? results[results.length - 1].screenshotPath : undefined;
+  if (results.length > 1 && finalScreenshot && finalScreenshot !== 'proof.png') {
+    try {
+      fs.copyFileSync(finalScreenshot, 'proof.png');
+      console.log(`Copied ${finalScreenshot} to proof.png for compatibility with run.sh`);
+    } catch (err) {
+      console.warn('Failed to copy consolidated proof.png', err);
+    }
+  }
+}
+
+runAll().catch((err) => {
   console.error(err);
   process.exit(1);
 });

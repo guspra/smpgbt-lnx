@@ -13,6 +13,13 @@ Use this guide when you roll the SIMPEG journal bot onto a Linux server.
 - **Environment**  
   - `cp .env.example .env` (if present) and fill `NIP`, `PASSWORD`, schedule values, etc.  
   - Keep `.env` owned by the user that will run the job.
+- **Multiple Accounts**  
+  - List every user inside the `ACCOUNTS_JSON` environment variable (JSON array string). Each object must provide at least `NIP` and `PASSWORD`, and can override any other field.  
+  - Example `.env` snippet:  
+    ```sh
+    ACCOUNTS_JSON=[{"NIP":"198607152007031002","PASSWORD":"Hunter2!","JOURNAL_TEXT":"Kerja"}]
+    ```  
+  - When multiple users are processed, each screenshot is saved as `proof-<NIP>.png` and the last run is also copied to `proof.png` for backward compatibility.
 
 - **Smoke Test**  
   - `chmod +x run.sh`  
